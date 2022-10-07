@@ -3,25 +3,28 @@ This file runs inference on DECAF model and generates readable results.
 Created by Renhao Liu, CIG, WUSTL, 2021.
 """
 
+import logging
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+import time
+import warnings
+
+from absl import app, flags
+import h5py
+import imageio
+import numpy as np
+from PIL import Image
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
-import h5py
-import logging
 import tensorflow as tf
+
 tf.get_logger().setLevel(logging.ERROR)
-import warnings
-warnings.filterwarnings("ignore")
-import time
-import numpy as np
-from absl import app, flags
-import imageio
-from PIL import Image
 
 from model.model import Model
 from model.provider import DecafEndToEndProvider
+
+warnings.filterwarnings("ignore")
 
 FLAGS = flags.FLAGS
 # input, output dirs.
@@ -56,7 +59,8 @@ flags.DEFINE_float("n0", 1.33, "n0 of the medium.")
 flags.DEFINE_float("render_max", 0.02, "Range above average in rendering.")
 flags.DEFINE_float("render_min", 0.02, "Range below average in rendering.")
 
-#Permittivity to RI conversion
+
+# Permittivity to RI conversion
 def perm2RI(er, ei, n0):
     """
     Description: This function converts the recovered object's permittivity contrast into refractive index values more
@@ -68,9 +72,10 @@ def perm2RI(er, ei, n0):
              ni: scalar, 2D, or 3D matrix of object's imaginary refractive index value.
     """
     print("er max: {}, er min:{}".format(er.max(), er.min()))
-    nr = np.sqrt(0.5 * ((n0**2 + er) + np.sqrt((n0**2 + er)**2 + ei**2)))
+    nr = np.sqrt(0.5 * ((n0 ** 2 + er) + np.sqrt((n0 ** 2 + er) ** 2 + ei ** 2)))
     ni = np.divide(ei, 2 * nr)
     return nr, ni
+
 
 def main(argv):
     """
@@ -79,10 +84,10 @@ def main(argv):
     print("DECAF prediction started. Loading files.")
     data = h5py.File(FLAGS.input_dir, 'r')
     provider = DecafEndToEndProvider(data, [0, 1])
-    
+
     print("Inference started.")
     tic = time.perf_counter()
-    
+
     rows = int(provider.measurement_size)
     cols = int(provider.measurement_size)
 
@@ -117,8 +122,8 @@ def main(argv):
             (FLAGS.z_render_max + 1e-8 - FLAGS.z_render_min) / FLAGS.z_delta
         )
         key_z_max = (
-            FLAGS.z_render_min + (partial_zs - 1) * FLAGS.z_delta - FLAGS.z_min
-        ) / FLAGS.z_train_delta
+                            FLAGS.z_render_min + (partial_zs - 1) * FLAGS.z_delta - FLAGS.z_min
+                    ) / FLAGS.z_train_delta
         print(key_z_max)
         zs_idx = np.linspace(key_z_min, key_z_max, num=int(partial_zs))
     else:
@@ -167,7 +172,7 @@ def main(argv):
     print("Inference ended in {:4} seconds.".format(toc - tic))
     with h5py.File(save_path, "w") as h5_file:
         h5_file.create_dataset("recon", data=recon)
-    
+
     print("Prediction saved to {}".format(save_path))
 
     ab = recon[:, :, :, 1]
@@ -176,14 +181,14 @@ def main(argv):
     visual = "n_re"
     n_re, n_im = perm2RI(ph, ab, FLAGS.n0)
     result = n_re
-    
+
     if visual == 'n_re':
-        up = FLAGS.n0 + FLAGS.render_max;
-        low = FLAGS.n0 + FLAGS.render_min;
+        up = FLAGS.n0 + FLAGS.render_max
+        low = FLAGS.n0 + FLAGS.render_min
     else:
         up = FLAGS.render_max
         low = FLAGS.render_min
-    mu = (up + low) / 2;
+    mu = (up + low) / 2
     w = up - low
     result = np.clip(result, low, up)
     result -= np.min(result)
@@ -191,7 +196,7 @@ def main(argv):
     result *= 255
     result = result.astype(np.uint8)
 
-    video_frames =[]
+    video_frames = []
     image_dir = '{}/{}/'.format(output_dir, save_name)
     if not os.path.exists(image_dir):
         os.makedirs(image_dir)
@@ -202,6 +207,7 @@ def main(argv):
 
     f = '{}/{}.mp4'.format(output_dir, save_name)
     imageio.mimwrite(f, video_frames, fps=8, quality=7)
+
 
 if __name__ == "__main__":
     app.run(main)
